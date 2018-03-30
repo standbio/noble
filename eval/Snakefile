@@ -1,0 +1,100 @@
+ALLFAMILIES = ('helium', 'neon', 'argon', 'krypton')
+ALLINDIV = ('mother', 'father', 'proband')
+SCALE = {
+    'helium': 1e0,
+    'neon': 1e1,
+    'argon': 1e2,
+    'krypton': 1e3,
+}
+
+
+rule all:
+    input: expand('{family}-eval.txt', family=ALLFAMILIES)
+
+
+rule helium:
+    input: 'helium-eval.txt'
+
+
+rule neon:
+    input: 'neon-eval.txt'
+
+
+rule argon:
+    input: 'argon-eval.txt'
+
+
+rule krypton:
+    input: 'krypton-eval.txt'
+
+
+rule download_reads:
+    output: '{family}-{indiv}-reads.fq.gz'
+    shell: 'wget https://s3-us-west-1.amazonaws.com/noble-trios/{output}'
+
+
+rule download_refr:
+    output: '{family}-refr.fa.gz'
+    shell: 'wget https://s3-us-west-1.amazonaws.com/noble-trios/{output}'
+
+
+rule novel_reads:
+    input:
+        expand('{{family}}-{indiv}-reads.fq.gz', indiv=ALLINDIV)
+    output:
+        '{family}-novel.augfastq.gz',
+        expand('{{family}}-{indiv}-kmers.counttable', indiv=ALLINDIV)
+    threads: 16
+    params:
+        memory=lambda w: '{:.0f}M'.format(50 * SCALE[w.family])
+    shell: '''kevlar novel \
+    --ksize 31 --threads {threads} \
+    --control {input[0]} --control {input[1]} --case {input[2]} \
+    --case-min 6 --ctrl-max 1 \
+    --memory {params.memory} --max-fpr 0.1 \
+    --out {output[0]} \
+    --save-ctrl-counts {output[1]} {output[2]} \
+    --save-case-counts {output[3]}
+    '''
+
+
+rule filter_reads:
+    input:
+        '{family}-novel.augfastq.gz',
+        '{family}-refr.fa.gz'
+    output: '{family}-filtered.augfastq.gz'
+    params:
+        maskmem=lambda w: '{:.0f}M'.format(5 * SCALE[w.family]),
+        abundmem=lambda w: '{:.0f}M'.format(10 * SCALE[w.family])
+    shell: '''kevlar filter \
+    --ksize 31 --abund-memory {params.abundmem} \
+    --mask {input[1]} --mask-memory {params.maskmem} --mask-max-fpr 0.005 \
+    --out {output} {input[0]}
+    '''
+
+
+rule partition:
+    input: '{family}-filtered.augfastq.gz'
+    output: '{family}-partitioned.augfastq.gz'
+    shell: 'kevlar partition --out {output} {input}'
+
+
+rule call_variants:
+    input:
+        '{family}-partitioned.augfastq.gz',
+        '{family}-refr.fa.gz'
+    output: '{family}-kevlar-calls.vcf'
+    shell: '''kevlar alac \
+    --delta 50 --seed-size 51 --ksize 31 \
+    --out {output} {input}
+    '''
+
+
+rule evaluate_accuracy:
+    input:
+        'kevlar-eval.sh',
+        '{family}.vcf',
+        '{family}-kevlar-calls.vcf'
+    output:
+        '{family}-eval.txt'
+    shell: 'bash {input} | tee {output}'

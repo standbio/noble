@@ -1,0 +1,7 @@
+.snakemake/
+*.fq
+*.fq.gz
+*.fasta.gz
+*.fa.gz
+*bloomfilter.lighter
+*.vcf

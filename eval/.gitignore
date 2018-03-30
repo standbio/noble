@@ -1,0 +1,7 @@
+.snakemake/
+*.vcf
+*.counttable
+*.augfastq.gz
+*reads.fq.gz
+*-refr.fa.gz*
+*-eval.txt
